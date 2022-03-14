@@ -4,6 +4,9 @@ import logging.config
 import json
 import os
 
+if not os.path.isdir('./logs'):
+    os.makedirs('./logs', exist_ok=True)
+        
 LOGGING_CONFIG = {
     'version': 1,
     'loggers': {
@@ -48,7 +51,7 @@ LOGGING_CONFIG = {
             'format': '[%(levelname)s | %(asctime)s | %(filename)s | %(funcName)s] (line %(lineno)d) %(message)s :: %(name)s logger'
         },
         'debug_format': {
-            'format': '[%(levelname)s | %(asctime)s | %(pathname)s | %(module)s | %(filename)s | %(funcName)s] (line %(lineno)d) %(message)s :: %(name)s logger'
+            'format': '[%(levelname)s | %(asctime)s| %(module)s | %(filename)s | %(funcName)s]\n (line %(lineno)d) %(message)s :: %(name)s logger \n'
         },
     },
 
@@ -63,7 +66,7 @@ class CustomLogger():
         
         self.info_logger = self._get_logger('info')
 
-    def _get_logger(self, logger_name: str) -> logging.Logger:
+    def _get_logger(self, logger_name: str):
         """
         make logger instance from logger config file
 

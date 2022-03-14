@@ -1,7 +1,14 @@
 from typing import List
-from pywinusb import hid
+# import pywinusb.hid as hid
+import hid
+import time
+import numpy as np
+import sys
+sys.path.append('./lib')
+from erle import encode
+from utils import CustomLogger
 
-
+logger = CustomLogger().info_logger
 
 def convlen(num: int,length: int) -> str:
     '''
@@ -18,7 +25,7 @@ def convlen(num: int,length: int) -> str:
             bit string
     '''
     bin_num=bin(num)[2:]
-    padding=length-len(num)
+    padding=length-len(bin_num)
     bin_num='0'*padding+bin_num
     return bin_num
 
@@ -53,10 +60,21 @@ class DMDhid():
         #usb Product ID
         product_num = 0xc900
 
-        filter = hid.HidDeviceFilter(vendor_id = vendor_num, product_id = product_num)
-        devices = filter.get_devices()
-        self.dev = devices[0]
-    
+        hid.enumerate()
+        self.device = hid.device()
+        self.device.open(0x0451, 0xc900)
+        time.sleep(0.5)
+        # filter = hid.HidDeviceFilter(vendor_id = vendor_num, product_id = product_num)
+        # devices = filter.get_devices()
+        # self.dev = devices[1]
+        # self.dev.open()
+
+        # self.out_report = self.dev.find_output_reports()[0]
+
+       
+    def read_handler(data):
+        return data   
+
     def command(self,mode,sequencebyte,com1,com2,data=None):
         '''
         _summary_
@@ -149,15 +167,13 @@ class DMDhid():
             for i in range(65 - len(buffer)):
                 buffer.append(0x00)
 
-                self.dev.set_raw_data(buffer)
-                self.dev.send()
+            self.device.write(buffer)
         
         else: # command length is larger than 65 (inculding report ID) bytes
             for i in range(65-len(buffer)):
                 buffer.append(data[i])
 
-            self.dev.set_raw_data(buffer) # 1st transfer
-            self.dev.send()
+            self.device.write(buffer)
 
             buffer = [0x00]
 
@@ -176,5 +192,237 @@ class DMDhid():
                     buffer.append(0x00)
                     j=j+1
                     
-                self.device.write(buffer)      
+                self.device.write(buffer)
 
+    def checkforerrors(self):
+        """
+        This part needs to be checked
+        """
+        self.ans = self.device.read(1)
+        self.flag = convlen(self.ans[0], 8)
+
+        if self.flag[2]=="1":
+            print("An error occurred! --> ", self.ans)
+            self.command('r',0x22,0x01,0x00,[]) # read error code
+            self.error = self.device.read(1)
+
+            self.command('r',0x22,0x01,0x01,[]) # read error description
+            self.response = self.device.read(128) 
+
+## function printing all of the dlp answer
+
+    def readreply(self):
+        for i in self.ans:
+            print (hex(i))
+
+## functions for idle mode activation
+
+    def idle_on(self):
+        self.command('w',0x00,0x02,0x01,[int('00000001',2)])
+        self.checkforerrors()
+
+    def idle_off(self):
+        self.command('w',0x00,0x02,0x01,[int('00000000',2)])
+        self.checkforerrors()
+
+## functions for power management
+
+    def standby(self):
+        self.command('w',0x00,0x02,0x00,[int('00000001',2)])
+        self.checkforerrors()
+
+    def wakeup(self):
+        self.command('w',0x00,0x02,0x00,[int('00000000',2)])
+        self.checkforerrors()
+
+    def reset(self):
+        self.command('w',0x00,0x02,0x00,[int('00000010',2)])
+        self.checkforerrors()
+
+## test write and read operations, as reported in the dlpc900 programmer's guide
+
+    def testread(self):
+        self.command('r',0xff,0x11,0x00,[])
+        self.readreply()
+
+    def testwrite(self):
+        self.command('w',0x22,0x11,0x00,[0xff,0x01,0xff,0x01,0xff,0x01])
+        self.checkforerrors()
+
+## some self explaining functions
+
+    def changemode(self,mode):
+        self.command('w',0x00,0x1a,0x1b,[mode])
+        self.checkforerrors()
+
+    def startsequence(self):
+        self.command('w',0x00,0x1a,0x24,[2])
+        self.checkforerrors()
+
+    def pausesequence(self):
+        self.command('w',0x00,0x1a,0x24,[1])
+        self.checkforerrors()
+
+    def stopsequence(self):
+        self.command('w',0x00,0x1a,0x24,[0])
+        self.checkforerrors()
+
+
+    def configurelut(self,imgnum,repeatnum):
+        img=convlen(imgnum,11)
+        repeat=convlen(repeatnum,32)
+
+        string=repeat+'00000'+img
+
+        bytes=bitstobytes(string)
+
+        self.command('w',0x00,0x1a,0x31,bytes)
+        self.checkforerrors()
+        
+
+    def definepattern(self,index,exposure,bitdepth,color,triggerin,darktime,triggerout,patind,bitpos):
+        payload=[]
+        index=convlen(index,16)
+        index=bitstobytes(index)
+        for i in range(len(index)):
+            payload.append(index[i])
+
+        exposure=convlen(exposure,24)
+        exposure=bitstobytes(exposure)
+        for i in range(len(exposure)):
+            payload.append(exposure[i])
+        optionsbyte=''
+        optionsbyte+='1'
+        bitdepth=convlen(bitdepth-1,3)
+        optionsbyte=bitdepth+optionsbyte
+        optionsbyte=color+optionsbyte
+        if triggerin:
+            optionsbyte='1'+optionsbyte
+        else:
+            optionsbyte='0'+optionsbyte
+
+        payload.append(bitstobytes(optionsbyte)[0])
+
+        darktime=convlen(darktime,24)
+        darktime=bitstobytes(darktime)
+        for i in range(len(darktime)):
+            payload.append(darktime[i])
+
+        triggerout=convlen(triggerout,8)
+        triggerout=bitstobytes(triggerout)
+        payload.append(triggerout[0])
+
+        patind=convlen(patind,11)
+        bitpos=convlen(bitpos,5)
+        lastbits=bitpos+patind
+        lastbits=bitstobytes(lastbits)
+        for i in range(len(lastbits)):
+            payload.append(lastbits[i])
+
+
+
+        self.command('w',0x00,0x1a,0x34,payload)
+        self.checkforerrors()
+        
+
+
+    def setbmp(self,index,size):
+        payload=[]
+
+        index=convlen(index,5)
+        index='0'*11+index
+        index=bitstobytes(index)
+        for i in range(len(index)):
+            payload.append(index[i]) 
+
+
+        total=convlen(size,32)
+        total=bitstobytes(total)
+        for i in range(len(total)):
+            payload.append(total[i])         
+        
+        self.command('w',0x00,0x1a,0x2a,payload)
+        self.checkforerrors()
+
+## bmp loading function, divided in 56 bytes packages
+## max  hid package size=64, flag bytes=4, usb command bytes=2
+## size of package description bytes=2. 64-4-2-2=56
+
+    def bmpload(self,image,size):
+
+        packnum=size//504+1
+
+        counter=0
+
+        for i in range(packnum):
+            if i %100==0:
+                print (i,packnum)
+            payload=[]
+            if i<packnum-1:
+                leng=convlen(504,16)
+                bits=504
+            else:
+                leng=convlen(size%504,16)
+                bits=size%504
+            leng=bitstobytes(leng)
+            for j in range(2):
+                payload.append(leng[j])
+            for j in range(bits):
+                payload.append(image[counter])
+                counter+=1
+            self.command('w',0x11,0x1a,0x2b,payload)
+
+
+            self.checkforerrors()
+
+    def defsequence(self,images,exp,ti,dt,to,rep):
+
+        self.stopsequence()
+
+        arr=[]
+
+        for i in images:
+            arr.append(i)
+        logger.debug(f'arr length : {len(arr)}')
+
+##        arr.append(numpy.ones((1080,1920),dtype='uint8'))
+
+        num=len(arr)
+
+        encodedimages=[]
+        sizes=[]
+
+        for i in range((num-1)//24+1):
+            print ('merging...')
+            if i<((num-1)//24):
+                logger.debug(f'{i} < ((num-1)//24) [{((num-1)//24)}]')
+                imagedata=arr[i*24:(i+1)*24]
+                logger.debug(f'imgdata length : [{len(imagedata)}]')
+            else:
+                logger.debug(f'{i} >= ((num-1)//24) [{((num-1)//24)}]')
+                imagedata=arr[i*24:]
+                logger.debug(f'imgdata length : [{len(imagedata)}]')
+            print ('encoding...')
+            imagedata,size=encode(imagedata)
+            logger.debug(f'imgdata, size : [{len(imagedata)}], [{size}]')
+
+            encodedimages.append(imagedata)
+            logger.debug(f'encodedimages length : {len(encodedimages)}')
+            sizes.append(size)
+            logger.debug(f'sizes length : {len(sizes)}')
+
+            if i<((num-1)//24):
+                for j in range(i*24,(i+1)*24):
+                    self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
+            else:
+                for j in range(i*24,num):
+                    self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
+
+        self.configurelut(num,rep)
+
+        for i in range((num-1)//24+1):
+        
+            self.setbmp((num-1)//24-i,sizes[(num-1)//24-i])
+
+            print ('uploading...')
+            self.bmpload(encodedimages[(num-1)//24-i],sizes[(num-1)//24-i])
