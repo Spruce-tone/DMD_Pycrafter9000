@@ -5,10 +5,13 @@ import time
 import numpy as np
 import sys
 sys.path.append('./lib')
-from erle import encode
+from erle import encode, new_encode
 from utils import CustomLogger
 
 logger = CustomLogger().info_logger
+
+WIDTH = int(2560/2)
+HEIGHT = 1600
 
 def convlen(num: int,length: int) -> str:
     '''
@@ -326,7 +329,7 @@ class DMDhid():
         
 
 
-    def setbmp(self,index,size):
+    def setbmp(self,index,size, controller='master'):
         payload=[]
 
         index=convlen(index,5)
@@ -341,14 +344,18 @@ class DMDhid():
         for i in range(len(total)):
             payload.append(total[i])         
         
-        self.command('w',0x00,0x1a,0x2a,payload)
+        if controller=='master':
+            self.command('w',0x00,0x1a,0x2a,payload)
+        elif controller=='slave':
+            self.command('w',0x00,0x1a,0x2c,payload)
+            
         self.checkforerrors()
 
 ## bmp loading function, divided in 56 bytes packages
 ## max  hid package size=64, flag bytes=4, usb command bytes=2
 ## size of package description bytes=2. 64-4-2-2=56
 
-    def bmpload(self,image,size):
+    def bmpload(self,image,size, controller='master'):
 
         packnum=size//504+1
 
@@ -370,7 +377,11 @@ class DMDhid():
             for j in range(bits):
                 payload.append(image[counter])
                 counter+=1
-            self.command('w',0x11,0x1a,0x2b,payload)
+            
+            if controller=='master':
+                self.command('w',0x11,0x1a,0x2b,payload)
+            elif controller=='slave':
+                self.command('w',0x11,0x1a,0x2d,payload)
 
 
             self.checkforerrors()
@@ -379,37 +390,58 @@ class DMDhid():
 
         self.stopsequence()
 
-        arr=[]
+        master_arr=[]
+        slave_arr = []
 
-        for i in images:
-            arr.append(i)
-        logger.debug(f'arr length : {len(arr)}')
+        for img in images:
+            master_arr.append(img[:, :WIDTH])
+            slave_arr.append(img[:, WIDTH:])
+        logger.debug(f'master_arr length : {len(master_arr)}')
+        logger.debug(f'slave_arr length : {len(slave_arr)}')
 
-##        arr.append(numpy.ones((1080,1920),dtype='uint8'))
+##        arr.append(np.ones((1080,1920),dtype='uint8'))
 
-        num=len(arr)
+        num=len(master_arr)
 
-        encodedimages=[]
-        sizes=[]
+        maserter_encodedimages=[]
+        slave_encodedimages=[]
+        maseter_sizes=[]
+        salve_sizes=[]
 
         for i in range((num-1)//24+1):
             print ('merging...')
             if i<((num-1)//24):
+                master_imagedata=master_arr[i*24:(i+1)*24]
+                slave_imagedata=slave_arr[i*24:(i+1)*24]
                 logger.debug(f'{i} < ((num-1)//24) [{((num-1)//24)}]')
-                imagedata=arr[i*24:(i+1)*24]
-                logger.debug(f'imgdata length : [{len(imagedata)}]')
+                logger.debug(f'imgdata length | Master [{len(master_imagedata)}] | Slave [{len(slave_imagedata)}]')
             else:
+                master_imagedata=master_arr[i*24:]
+                slave_imagedata=slave_arr[i*24:]
                 logger.debug(f'{i} >= ((num-1)//24) [{((num-1)//24)}]')
-                imagedata=arr[i*24:]
-                logger.debug(f'imgdata length : [{len(imagedata)}]')
-            print ('encoding...')
-            imagedata,size=encode(imagedata)
-            logger.debug(f'imgdata, size : [{len(imagedata)}], [{size}]')
+                logger.debug(f'imgdata length | Master [{len(master_imagedata)}] | Slave [{len(slave_imagedata)}]')
 
-            encodedimages.append(imagedata)
-            logger.debug(f'encodedimages length : {len(encodedimages)}')
-            sizes.append(size)
-            logger.debug(f'sizes length : {len(sizes)}')
+            print ('encoding...')
+            master_imagedata = mergeimages(master_imagedata)
+            slave_imagedata = mergeimages(slave_imagedata)
+
+            master_imagedata, master_size=new_encode(master_imagedata)
+            slave_imagedata, slave_size=new_encode(slave_imagedata)
+            logger.debug(f'imgdata length | Master [{len(master_imagedata)}] | Slave [{len(slave_imagedata)}]')
+
+            logger.debug(f'Master Imagedata, size : [{len(master_imagedata)}], [{master_size}]')
+            logger.debug(f'Slave Imagedata, size : [{len(slave_imagedata)}], [{slave_size}]')
+
+            maserter_encodedimages.append(master_imagedata)
+            slave_encodedimages.append(slave_imagedata)
+
+            logger.debug(f'Master encodedimages length : {len(maserter_encodedimages)}')
+            logger.debug(f'Slave encodedimages length : {len(slave_encodedimages)}')
+
+            maseter_sizes.append(master_size)
+            salve_sizes.append(slave_size)
+            logger.debug(f'Master sizes length : {len(maseter_sizes)}')
+            logger.debug(f'Slave sizes length : {len(salve_sizes)}')
 
             if i<((num-1)//24):
                 for j in range(i*24,(i+1)*24):
@@ -422,7 +454,29 @@ class DMDhid():
 
         for i in range((num-1)//24+1):
         
-            self.setbmp((num-1)//24-i,sizes[(num-1)//24-i])
+            self.setbmp((num-1)//24-i, maseter_sizes[(num-1)//24-i], controller='master')
+            self.setbmp((num-1)//24-i, salve_sizes[(num-1)//24-i], controller='slave')
 
             print ('uploading...')
-            self.bmpload(encodedimages[(num-1)//24-i],sizes[(num-1)//24-i])
+            self.bmpload(maserter_encodedimages[(num-1)//24-i],maseter_sizes[(num-1)//24-i], controller='master')
+            self.bmpload(slave_encodedimages[(num-1)//24-i],salve_sizes[(num-1)//24-i], controller='slave')
+
+
+def mergeimages(images):
+    """
+    function that encodes a 8 bit numpy array matrix as a enhanced run length encoded string of bits
+    """
+    mergedimage=np.zeros((HEIGHT, WIDTH,3),dtype='uint8') #put this as np.uint8?
+
+    for i in range(len(images)):
+        
+        if i<8:
+            mergedimage[:,:,2]=mergedimage[:,:,2]+images[i]*(2**i) #with the multiplication, the 8 bit pixel contains the info abopu all the 8 images (if we are in binary...)
+
+        if i>7 and i<16:
+            mergedimage[:,:,1]=mergedimage[:,:,1]+images[i]*(2**(i-8))
+
+        if i>15 and i<24: #maybe 24 because in RGB you have 8*3
+            mergedimage[:,:,0]=mergedimage[:,:,0]+images[i]*(2**(i-16))
+            
+    return mergedimage
