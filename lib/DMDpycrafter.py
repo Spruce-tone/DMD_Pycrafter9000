@@ -284,9 +284,11 @@ class DMDhid():
         
 
     def definepattern(self,index,exposure,bitdepth,color,triggerin,darktime,triggerout,patind,bitpos):
+        logger.debug(f'define pattern index input: {index}')
         payload=[]
         index=convlen(index,16)
         index=bitstobytes(index)
+        logger.debug(f'define pattern byte index : {index}')
         for i in range(len(index)):
             payload.append(index[i])
 
@@ -321,8 +323,6 @@ class DMDhid():
         lastbits=bitstobytes(lastbits)
         for i in range(len(lastbits)):
             payload.append(lastbits[i])
-
-
 
         self.command('w',0x00,0x1a,0x34,payload)
         self.checkforerrors()
@@ -402,6 +402,7 @@ class DMDhid():
 ##        arr.append(np.ones((1080,1920),dtype='uint8'))
 
         num=len(master_arr)
+        logger.debug(f'No. of images : {num}')
 
         maserter_encodedimages=[]
         slave_encodedimages=[]
@@ -442,18 +443,21 @@ class DMDhid():
             salve_sizes.append(slave_size)
             logger.debug(f'Master sizes length : {len(maseter_sizes)}')
             logger.debug(f'Slave sizes length : {len(salve_sizes)}')
-
+            
+            logger.debug(f'Index : {((num-1)//24)}')
             if i<((num-1)//24):
+                logger.debug(f'case I : i < ((num-1)//24) | {i} < {((num-1)//24)}')
                 for j in range(i*24,(i+1)*24):
                     self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
             else:
+                logger.debug(f'case II : i >= ((num-1)//24) | {i} < {((num-1)//24)}')
                 for j in range(i*24,num):
                     self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
 
         self.configurelut(num,rep)
 
         for i in range((num-1)//24+1):
-        
+            logger.debug(f'set bmp idx | (num-1)//24+1 {(num-1)//24+1}, (num-1)//24-i {(num-1)//24-i}')
             self.setbmp((num-1)//24-i, maseter_sizes[(num-1)//24-i], controller='master')
             self.setbmp((num-1)//24-i, salve_sizes[(num-1)//24-i], controller='slave')
 
