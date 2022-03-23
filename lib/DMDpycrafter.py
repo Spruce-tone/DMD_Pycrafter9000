@@ -484,3 +484,15 @@ def mergeimages(images):
             mergedimage[:,:,0]=mergedimage[:,:,0]+images[i]*(2**(i-16))
             
     return mergedimage
+
+
+
+
+'''
+To do list
+
+- encoding algorithm optimize
+- image sequence as input to save memory
+- master, slave command optimize
+- Hadamard matrix generation
+'''
