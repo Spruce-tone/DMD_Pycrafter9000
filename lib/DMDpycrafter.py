@@ -360,6 +360,9 @@ class DMDhid():
         packnum=size//504+1
 
         counter=0
+        logger.debug(f'bmpload image shape : {len(image)}')
+        logger.debug(f'bmpload size : {size}')
+        logger.debug(f'bmpload packnum : {packnum}')
 
         for i in range(packnum):
             if i %100==0:
@@ -372,14 +375,22 @@ class DMDhid():
                 leng=convlen(size%504,16)
                 bits=size%504
             leng=bitstobytes(leng)
-            for j in range(2):
-                payload.append(leng[j])
-            for j in range(bits):
-                payload.append(image[counter])
-                counter+=1
+
+            logger.debug(f'bmpload bits : {bits}')
+            payload += [leng[0], leng[1]]
+            payload += image[counter : counter+bits]
+            counter += bits
+
+            # for j in range(2):
+            #     payload.append(leng[j])
+            # for j in range(bits):
+            #     payload.append(image[counter])
+            #     counter+=1
             
             if controller=='master':
+                a = time.time()
                 self.command('w',0x11,0x1a,0x2b,payload)
+                logger.debug(f'loading time : {a - time.time()}')
             elif controller=='slave':
                 self.command('w',0x11,0x1a,0x2d,payload)
 
@@ -462,6 +473,7 @@ class DMDhid():
             self.setbmp((num-1)//24-i, salve_sizes[(num-1)//24-i], controller='slave')
 
             print ('uploading...')
+            logger.debug(f'uploading')
             self.bmpload(maserter_encodedimages[(num-1)//24-i],maseter_sizes[(num-1)//24-i], controller='master')
             self.bmpload(slave_encodedimages[(num-1)//24-i],salve_sizes[(num-1)//24-i], controller='slave')
 
