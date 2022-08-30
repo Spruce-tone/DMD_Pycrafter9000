@@ -10,7 +10,7 @@ https://github.com/e841018/ERLE
 import numpy as np
 import struct
 from typing import List
-from utils import CustomLogger
+from lib.utils import CustomLogger
 
 logger = CustomLogger().info_logger
 
@@ -61,9 +61,10 @@ def merge(images):
     for idx, batch_size in enumerate(batches):
         image8 = np.zeros((HEIGHT, WIDTH), dtype=np.uint8)
         for j in range(batch_size):
-            image8 += images[idx*8+j]*(1 << j)
+            image8 += (images[idx*8+j]*(1 << j)).astype(np.uint8)
+
         image32 += image8*(1 << (idx*8))
-    logger.debug(f'image32 | shape : {image32.shape} | dtype : {image32.dtype}')
+        logger.debug(f'image32 | shape : {image32.shape} | dtype : {image32.dtype}')
     return image32
 
 
@@ -109,7 +110,7 @@ def encode_row(row, same_prev):
     
     j = 0
     compressed = bytearray(0)
-    while j < WIDTH:
+    while j < WIDTH*2:
 
         # copy n pixels from previous line
         if same_prev[j]:
@@ -218,7 +219,7 @@ def new_encode(image):
     in an infinite loop for some hadamard pattern. Everything seems to work fine.
     """
 
-## header creation
+    ## header creation
     bytecount=48    
     bitstring=[]
 
@@ -474,11 +475,170 @@ def new_encode(image):
 
     size=bytecount
 
-    print (size)
-
     total=convlen(size,32)
     total=bitstobytes(total)
     for i in range(len(total)):
         bitstring[i+8]=total[i]    
     
     return bitstring, bytecount
+
+
+def encode_erle(pattern):
+    """
+    Encode a 24bit pattern in enhanced run length encoding (ERLE).
+    ERLE is similar to RLE, but now the number of repeats byte is given by either one or two bytes.
+    specification:
+    ctrl byte 1, ctrl byte 2, ctrl byte 3, description
+    0          , 0          , n/a        , end of image
+    0          , 1          , n          , copy n pixels from the same position on the previous line
+    0          , n>1        , n/a        , n uncompressed RGB pixels follow
+    n>1        , n/a        , n/a        , repeat following pixel n times
+    :param pattern: uint8 3 x Ny x Nx array of RGB values, or Ny x Nx array
+    :return pattern_compressed:
+    """
+
+    pattern = np.moveaxis(pattern, [0, 1, 2], [1, 2, 0])
+
+    # pattern must be uint8
+    if pattern.dtype != np.uint8:
+        raise ValueError('pattern must be of type uint8')
+
+    # if 2D pattern, expand this to RGB with pattern in B layer and RG=0
+    if pattern.ndim == 2:
+        pattern = np.concatenate((np.zeros((1,) + pattern.shape, dtype=np.uint8),
+                                  np.zeros((1,) + pattern.shape, dtype=np.uint8),
+                                  np.array(pattern[None, :, :], copy=True)), axis=0)
+
+    if pattern.ndim != 3 and pattern.shape[0] != 3:
+        raise ValueError("Image data is wrong shape. Must be 3 x ny x nx, with RGB values in each layer.")
+
+    pattern_compressed = []
+    _, ny, nx = pattern.shape
+
+    # todo: not sure if this is allowed to cross row_rgb boundaries? If so, could pattern.ravel() instead of looping
+    # todo: don't think above suggestion works, but if last n pixels of above row_rgb are same as first n of this one
+    # todo: then with ERLE encoding I can use \x00\x01 Hex(n). But checking this may not be so easy. Right now
+    # todo: only implemented if entire rows are the same!
+    # todo: erle and rle are different enough probably should split apart more
+    # loop over pattern rows
+    for ii in range(pattern.shape[1]):
+        row_rgb = pattern[:, ii, :]
+
+        # if this row_rgb is the same as the last row_rgb, can communicate this by sending length of row_rgb
+        # and then \x00\x01 (copy n pixels from previous line)
+        # todo: can also do this for shorter sequences than the entire row_rgb
+        if ii > 0 and np.array_equal(row_rgb, pattern[:, ii - 1, :]):
+            msb, lsb = erle_len2bytes(nx)
+            pattern_compressed += [0x00, 0x01, msb, lsb]
+        else:
+
+            # find points along row where pixel value changes
+            # for RGB image, change happens when ANY pixel value changes
+            value_changed = np.sum(np.abs(np.diff(row_rgb, axis=1)), axis=0) != 0
+            # also need to include zero, as this will need to be encoded.
+            # add one to index to get position of first new value instead of last old value
+            inds_change = np.concatenate((np.array([0]), np.where(value_changed)[0] + 1))
+
+            # get lengths for each repeat, including last one which extends until end of the line
+            run_lens = np.concatenate((np.array(inds_change[1:] - inds_change[:-1]),
+                                       np.array([nx - inds_change[-1]])))
+
+            # now build compressed list
+            for ii, rlen in zip(inds_change, run_lens):
+                v = row_rgb[:, ii]
+                length_bytes = erle_len2bytes(rlen)
+                pattern_compressed += length_bytes + [v[0], v[1], v[2]]
+
+    # bytes indicating image end
+    pattern_compressed += [0x00, 0x01, 0x00]
+
+
+    # get the header
+    # Note: taken directly from sniffer of the TI GUI
+    signature_bytes = [0x53, 0x70, 0x6C, 0x64]
+    width_byte = list(struct.unpack('BB', struct.pack('<H', WIDTH)))
+    height_byte = list(struct.unpack('BB', struct.pack('<H', HEIGHT)))
+    # Number of bytes in encoded image_data
+    num_encoded_bytes = list(struct.unpack('BBBB', struct.pack('<I', len(pattern_compressed))))
+    reserved_bytes = [0xFF] * 8  # reserved
+    bg_color_bytes = [0x00] * 4  # BG color BB, GG, RR, 00
+
+    # # encoding 0 none, 1 rle, 2 erle
+    # if compression_mode == 'none':
+    #     encoding_byte = [0x00]
+    # elif compression_mode == 'rle':
+    #     encoding_byte = [0x01]
+    # elif compression_mode == 'erle':
+    #     encoding_byte = [0x02]
+    # else:
+    #     raise ValueError("compression_mode must be 'none', 'rle', or 'erle' but was '%s'" % compression_mode)
+
+    encoding_byte = [0x02] # 'erle' encoding
+    # general_data = signature_bytes + width_byte + height_byte + num_encoded_bytes + \
+    #             reserved_bytes + bg_color_bytes + [0x01] + encoding_byte + \
+    #             [0x01] + [0x00] * 2 + [0x01] + [0x00] * 18 # reserved
+    general_data = signature_bytes + width_byte + height_byte + num_encoded_bytes + \
+                reserved_bytes + bg_color_bytes + [0x00] + encoding_byte + \
+                [0x01] + [0x00]*21 # reserved
+
+    data = general_data + pattern_compressed
+    return data
+
+def erle_len2bytes(length):
+    """
+    Encode a length between 0-2**15-1 as 1 or 2 bytes for use in erle encoding format.
+    Do this in the following way: if length < 128, encode as one byte
+    If length > 128, then encode as two bits. Create the least significant byte (LSB) as follows: set the most
+    significant bit as 1 (this is a flag indicating two bytes are being used), then use the least signifcant 7 bits
+    from length. Construct the most significant byte (MSB) by throwing away the 7 bits already encoded in the LSB.
+    i.e.
+    lsb = (length & 0x7F) | 0x80
+    msb = length >> 7
+    :param length: integer 0-(2**15-1)
+    :return:
+    """
+
+    # check input
+    if isinstance(length, float):
+        if length.is_integer():
+            length = int(length)
+        else:
+            raise TypeError('length must be convertible to integer.')
+
+    # if not isinstance(length, int):
+    #     raise Exception('length must be an integer')
+
+    if length < 0 or length > 2 ** 15 - 1:
+        raise ValueError('length is negative or too large to be encoded.')
+
+    # main function
+    if length < 128:
+        len_bytes = [length]
+    else:
+        # i.e. lsb is formed by taking the 7 least significant bits and extending to 8 bits by adding
+        # a 1 in the msb position
+        lsb = (length & 0x7F) | 0x80
+        # second byte obtained by throwing away first 7 bits and keeping what remains
+        msb = length >> 7
+        len_bytes = [lsb, msb]
+
+    return len_bytes
+
+
+def erle_bytes2len(byte_list):
+    """
+    Convert a 1 or 2 byte list in little endian order to length
+    :param list byte_list: [byte] or [lsb, msb]
+    :return length:
+    """
+    # if msb is None:
+    #     length = lsb
+    # else:
+    #     length = (msb << 7) + (lsb - 0x80)
+    if len(byte_list) == 1:
+        length = byte_list[0]
+    else:
+        lsb, msb = byte_list
+        length = (msb << 7) + (lsb - 0x80)
+
+    return 

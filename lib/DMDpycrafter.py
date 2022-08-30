@@ -4,9 +4,10 @@ import hid
 import time
 import numpy as np
 import sys
-sys.path.append('./lib')
-from erle import encode, new_encode
-from utils import CustomLogger
+import struct
+
+from lib.erle import *
+from lib.utils import CustomLogger
 
 logger = CustomLogger().info_logger
 
@@ -135,7 +136,7 @@ class DMDhid():
         
         ex)
         case I) command length <= 65 bytes
-        Report ID - Header bytes - Paload Bytes
+        Report ID - Header bytes - Payload Bytes
 
         case II) command length > 65 bytes
         if the command length is 83 bytes
@@ -153,6 +154,7 @@ class DMDhid():
         buffer.append(0x00) # Report ID [Byte 0]
         buffer.append(bitstobytes(flagstring)[0]) # Flag byte [Byte 1]
         buffer.append(sequencebyte) # Sequence byte [Byte 2]
+
         # Because the USB command length is 2 bytes in Payload, 2 is added to the data length 
         payload_len_byte=bitstobytes(convlen(len(data)+2,16)) # payload length in byte = usb command (2 bytes) + data length (len(data))
         buffer.append(payload_len_byte[0]) # payload length LSB [Byte 3]
@@ -164,7 +166,7 @@ class DMDhid():
         if len(buffer) + len(data) <= 65: # maximum 65 bytes including Report ID can be sent per transmission
             # add data to buffer
             for i in data:
-                buffer.append(i) 
+                buffer.append(i)
 
             # fill the remaining buffer with 0x00 (1 byte)
             for i in range(65 - len(buffer)):
@@ -338,7 +340,6 @@ class DMDhid():
         for i in range(len(index)):
             payload.append(index[i]) 
 
-
         total=convlen(size,32)
         total=bitstobytes(total)
         for i in range(len(total)):
@@ -365,6 +366,7 @@ class DMDhid():
         logger.debug(f'bmpload packnum : {packnum}')
 
         for i in range(packnum):
+            st_time = time.time()
             if i %100==0:
                 print (i,packnum)
             payload=[]
@@ -386,18 +388,26 @@ class DMDhid():
             # for j in range(bits):
             #     payload.append(image[counter])
             #     counter+=1
+            logger.debug(f'before loading time : {time.time() - st_time}')
             
             if controller=='master':
                 a = time.time()
                 self.command('w',0x11,0x1a,0x2b,payload)
-                logger.debug(f'loading time : {a - time.time()}')
+                logger.debug(f'master loading time : {time.time() - a}')
             elif controller=='slave':
+                a = time.time()
                 self.command('w',0x11,0x1a,0x2d,payload)
+                logger.debug(f'slave loading time : {time.time() - a}')
 
 
             self.checkforerrors()
 
-    def defsequence(self,images,exp,ti,dt,to,rep):
+    def getidx(self, image_index):
+        merged_idx = image_index//24
+        bitplane_idx = image_index - merged_idx*24
+        return merged_idx, bitplane_idx
+
+    def defsequence(self,images,exp,ti,dt,to,rep, img_index_seq):
 
         self.stopsequence()
 
@@ -436,13 +446,20 @@ class DMDhid():
             print ('encoding...')
             master_imagedata = mergeimages(master_imagedata)
             slave_imagedata = mergeimages(slave_imagedata)
+            # logger.debug(f'img data {master_imagedata}')
 
-            master_imagedata, master_size=new_encode(master_imagedata)
-            slave_imagedata, slave_size=new_encode(slave_imagedata)
+            # master_imagedata, master_size = new_encode(master_imagedata)
+            # slave_imagedata, slave_size = new_encode(slave_imagedata)
+            # logger.debug(f'img data new {master_imagedata}')
+
+
+            master_imagedata  = encode_erle(master_imagedata)
+            master_size = len(master_imagedata)
+            slave_imagedata = encode_erle(slave_imagedata)
+            slave_size = len(slave_imagedata)
+            logger.debug(f'img data new {master_imagedata}')
+
             logger.debug(f'imgdata length | Master [{len(master_imagedata)}] | Slave [{len(slave_imagedata)}]')
-
-            logger.debug(f'Master Imagedata, size : [{len(master_imagedata)}], [{master_size}]')
-            logger.debug(f'Slave Imagedata, size : [{len(slave_imagedata)}], [{slave_size}]')
 
             maserter_encodedimages.append(master_imagedata)
             slave_encodedimages.append(slave_imagedata)
@@ -454,19 +471,35 @@ class DMDhid():
             salve_sizes.append(slave_size)
             logger.debug(f'Master sizes length : {len(maseter_sizes)}')
             logger.debug(f'Slave sizes length : {len(salve_sizes)}')
+            print(f'Compressed data size | master : {master_size} | slave : {salve_sizes}')
             
             logger.debug(f'Index : {((num-1)//24)}')
-            if i<((num-1)//24):
-                logger.debug(f'case I : i < ((num-1)//24) | {i} < {((num-1)//24)}')
-                for j in range(i*24,(i+1)*24):
-                    self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
-            else:
-                logger.debug(f'case II : i >= ((num-1)//24) | {i} < {((num-1)//24)}')
-                for j in range(i*24,num):
-                    self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
 
-        self.configurelut(num,rep)
+        for idx, img_idx in enumerate(img_index_seq):
+            merged_idx, bitplane_idx = self.getidx(img_idx)
+            logger.debug(f'getIndex : {idx} | {img_idx} | {merged_idx} | {bitplane_idx}')
+            self.definepattern(idx, exp[img_idx],1,'111',ti[img_idx],dt[img_idx],to[img_idx],merged_idx, bitplane_idx)
 
+
+        # if i<((num-1)//24):
+        #     # j image index (index for iamge sequence)
+        #     # i 24bit RGB image index (index for merged 24bit RGB bitplane image )
+        #     # j-i*24 (bitplane image index in merged 24bit RGB)
+        #     # example)
+        #     # 50 images (j ranged 0-49)
+        #     # 50 images merged into 3 of 24bit RGB image, each 24bit RGB image include 24, 24 and 2 images (i ranged 0-2)
+        #     # j-i*24 means index for each images in 24bit RGB image (j-i*24 ranged 0-23)
+        #     logger.debug(f'case I : i < ((num-1)//24) | {i} < {((num-1)//24)}')
+        #     for j in range(i*24,(i+1)*24):
+        #         self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
+        # else:
+        #     logger.debug(f'case II : i >= ((num-1)//24) | {i} < {((num-1)//24)}')
+        #     for j in range(i*24,num):
+        #         self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
+
+        # self.configurelut(num,rep)
+
+        self.configurelut(len(img_index_seq), rep)
         for i in range((num-1)//24+1):
             logger.debug(f'set bmp idx | (num-1)//24+1 {(num-1)//24+1}, (num-1)//24-i {(num-1)//24-i}')
             self.setbmp((num-1)//24-i, maseter_sizes[(num-1)//24-i], controller='master')
@@ -476,6 +509,68 @@ class DMDhid():
             logger.debug(f'uploading')
             self.bmpload(maserter_encodedimages[(num-1)//24-i],maseter_sizes[(num-1)//24-i], controller='master')
             self.bmpload(slave_encodedimages[(num-1)//24-i],salve_sizes[(num-1)//24-i], controller='slave')
+
+        ########원본, img_index_seq 변수 삭제
+        # for i in range((num-1)//24+1):
+        #     print ('merging...')
+        #     if i<((num-1)//24):
+        #         master_imagedata=master_arr[i*24:(i+1)*24]
+        #         slave_imagedata=slave_arr[i*24:(i+1)*24]
+        #         logger.debug(f'{i} < ((num-1)//24) [{((num-1)//24)}]')
+        #         logger.debug(f'imgdata length | Master [{len(master_imagedata)}] | Slave [{len(slave_imagedata)}]')
+        #     else:
+        #         master_imagedata=master_arr[i*24:]
+        #         slave_imagedata=slave_arr[i*24:]
+        #         logger.debug(f'{i} >= ((num-1)//24) [{((num-1)//24)}]')
+        #         logger.debug(f'imgdata length | Master [{len(master_imagedata)}] | Slave [{len(slave_imagedata)}]')
+
+        #     print ('encoding...')
+        #     master_imagedata = mergeimages(master_imagedata)
+        #     slave_imagedata = mergeimages(slave_imagedata)
+
+        #     master_imagedata, master_size=new_encode(master_imagedata)
+        #     slave_imagedata, slave_size=new_encode(slave_imagedata)
+        #     logger.debug(f'imgdata length | Master [{len(master_imagedata)}] | Slave [{len(slave_imagedata)}]')
+
+        #     maserter_encodedimages.append(master_imagedata)
+        #     slave_encodedimages.append(slave_imagedata)
+
+        #     logger.debug(f'Master encodedimages length : {len(maserter_encodedimages)}')
+        #     logger.debug(f'Slave encodedimages length : {len(slave_encodedimages)}')
+
+        #     maseter_sizes.append(master_size)
+        #     salve_sizes.append(slave_size)
+        #     logger.debug(f'Master sizes length : {len(maseter_sizes)}')
+        #     logger.debug(f'Slave sizes length : {len(salve_sizes)}')
+            
+        #     logger.debug(f'Index : {((num-1)//24)}')
+        #     if i<((num-1)//24):
+        #         # j image index (index for iamge sequence)
+        #         # i 24bit RGB image index (index for merged 24bit RGB bitplane image )
+        #         # j-i*24 (bitplane image index in merged 24bit RGB)
+        #         # example)
+        #         # 50 images (j ranged 0-49)
+        #         # 50 images merged into 3 of 24bit RGB image, each 24bit RGB image include 24, 24 and 2 images (i ranged 0-2)
+        #         # j-i*24 means index for each images in 24bit RGB image (j-i*24 ranged 0-23)
+        #         logger.debug(f'case I : i < ((num-1)//24) | {i} < {((num-1)//24)}')
+        #         for j in range(i*24,(i+1)*24):
+        #             self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
+        #     else:
+        #         logger.debug(f'case II : i >= ((num-1)//24) | {i} < {((num-1)//24)}')
+        #         for j in range(i*24,num):
+        #             self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
+
+        # self.configurelut(num,rep)
+
+        # for i in range((num-1)//24+1):
+        #     logger.debug(f'set bmp idx | (num-1)//24+1 {(num-1)//24+1}, (num-1)//24-i {(num-1)//24-i}')
+        #     self.setbmp((num-1)//24-i, maseter_sizes[(num-1)//24-i], controller='master')
+        #     self.setbmp((num-1)//24-i, salve_sizes[(num-1)//24-i], controller='slave')
+
+        #     print ('uploading...')
+        #     logger.debug(f'uploading')
+        #     self.bmpload(maserter_encodedimages[(num-1)//24-i],maseter_sizes[(num-1)//24-i], controller='master')
+        #     self.bmpload(slave_encodedimages[(num-1)//24-i],salve_sizes[(num-1)//24-i], controller='slave')
 
 
 def mergeimages(images):

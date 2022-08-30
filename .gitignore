@@ -1,4 +1,11 @@
 logs
+thorcam
+trigger imaging
+manual imaging
+hadlib
 
+*.png
 *.log
 *.tif
+*.tiff
+
