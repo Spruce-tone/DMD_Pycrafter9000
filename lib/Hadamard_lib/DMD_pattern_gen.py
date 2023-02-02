@@ -1,8 +1,9 @@
-from typing import List
+from typing import List, Union, Tuple
 import os
 import numpy as np
 from .Hadamard_gen import *
 from .utils import *
+from PIL import ImageDraw, ImageFont, Image
 
 nlocations_and_offset = [11, 3]
 # nlocations_and_offset = [19 4];  [n offset]
@@ -137,3 +138,88 @@ def hadamard_bincode_nopermutation(nblock):
     bincode = bincode[-nblock:, :]
     return bincode
 
+def create_circular_mask(h: int, w: int, center: Union[bool, Tuple]=None, radius: Union[bool, Tuple]=None):
+
+    if center is None: # use the middle of the image
+        center = (int(w/2), int(h/2))
+    if radius is None: # use the smallest distance between the center and image walls
+        radius = min(center[0], center[1], w-center[0], h-center[1])
+
+    Y, X = np.ogrid[:h, :w]
+    dist_from_center = np.sqrt((X - center[0])**2 + (Y-center[1])**2)
+
+    mask = dist_from_center <= radius
+    return mask
+
+def checkerboard(shape: Tuple, exp_factor: int=1, shift: Tuple=(0,)):
+    if len(shift)==1:
+        shiftx = shifty = shift
+    elif len(shift)==2:
+        shiftx, shifty = shift
+    else:
+        raise f'shift should be a tuple that have a length 1 or 2'
+
+    unit = np.array([[0, 1],
+                [1, 0]])
+    
+    unit = unit.repeat(exp_factor, axis=0).repeat(exp_factor, axis=1)
+
+    sx, sy = unit.shape
+    imgx, imgy = shape
+    tilex, tiley = np.ceil(imgx/sx).astype(int), np.ceil(imgy/sy).astype(int)
+
+    pattern = np.tile(unit, reps=(tilex, tiley))
+    pattern = np.roll(pattern, shift=shiftx, axis=0)
+    pattern = np.roll(pattern, shift=shifty, axis=1)
+
+    return pattern
+    
+def line_pattern(shape: Tuple, exp_factor: int=1, shift: Tuple=(0,), axis: str='x'):
+    assert axis=='x' or axis=='y', 'axis should be a "x" or "y"'
+
+    if len(shift)==1:
+        shiftx = shifty = shift
+    elif len(shift)==2:
+        shiftx, shifty = shift
+    else:
+        raise f'shift should be a tuple that have a length 1 or 2'
+
+    if axis=='x':
+        unit = np.array([[0, 1],
+                    [0, 1]])
+    elif axis=='y':
+        unit = np.array([[1, 1],
+                    [0, 0]])
+    
+    unit = unit.repeat(exp_factor, axis=0).repeat(exp_factor, axis=1)
+
+    sx, sy = unit.shape
+    imgx, imgy = shape
+    tilex, tiley = np.ceil(imgx/sx).astype(int), np.ceil(imgy/sy).astype(int)
+
+    pattern = np.tile(unit, reps=(tilex, tiley))
+    pattern = np.roll(pattern, shift=shiftx, axis=0)
+    pattern = np.roll(pattern, shift=shifty, axis=1)
+
+    return pattern
+    
+def num_image(img_size: Tuple=(1600, 2560), shift: Tuple=(0, 0), num: int=0, font_size: int=1000):
+    if len(img_size)==1:
+        img_size = (img_size[0], img_size[0])
+    elif len(img_size)==2:
+        img_size = (img_size[1], img_size[0])
+    else:
+        raise f'img_size should be a tuple that have a length 1 or 2'
+
+    if len(shift)==1:
+        shift = (shift[0], shift[0])
+    elif len(shift)==2:
+        shift = (shift[0], shift[1])
+    else:
+        raise f'img_size should be a tuple that have a length 1 or 2'
+
+    img = Image.new(mode='L', size=img_size)
+    d = ImageDraw.Draw(img)
+    fnt = ImageFont.truetype(font='arial', size=font_size)
+    d.text((shift[0], shift[1]), str(num), fill=(255), font=fnt)
+    return img.__array__().astype(bool)

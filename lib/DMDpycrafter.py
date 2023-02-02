@@ -1,3 +1,11 @@
+'''
+copied from this repository
+https://github.com/micropolimi/DMD_ScopeFoundry
+@authour micropolimi
+
+https://github.com/csi-dcsc/Pycrafter6500
+@authour csi-dcsc
+'''
 from typing import List
 # import pywinusb.hid as hid
 import hid
@@ -420,8 +428,6 @@ class DMDhid():
         logger.debug(f'master_arr length : {len(master_arr)}')
         logger.debug(f'slave_arr length : {len(slave_arr)}')
 
-##        arr.append(np.ones((1080,1920),dtype='uint8'))
-
         num=len(master_arr)
         logger.debug(f'No. of images : {num}')
 
@@ -446,11 +452,7 @@ class DMDhid():
             print ('encoding...')
             master_imagedata = mergeimages(master_imagedata)
             slave_imagedata = mergeimages(slave_imagedata)
-            # logger.debug(f'img data {master_imagedata}')
 
-            # master_imagedata, master_size = new_encode(master_imagedata)
-            # slave_imagedata, slave_size = new_encode(slave_imagedata)
-            # logger.debug(f'img data new {master_imagedata}')
 
 
             master_imagedata  = encode_erle(master_imagedata)
@@ -478,26 +480,9 @@ class DMDhid():
         for idx, img_idx in enumerate(img_index_seq):
             merged_idx, bitplane_idx = self.getidx(img_idx)
             logger.debug(f'getIndex : {idx} | {img_idx} | {merged_idx} | {bitplane_idx}')
-            self.definepattern(idx, exp[img_idx],1,'111',ti[img_idx],dt[img_idx],to[img_idx],merged_idx, bitplane_idx)
+            # self.definepattern(idx, exp[img_idx], 1, '111', ti[img_idx], dt[img_idx], to[img_idx], merged_idx, bitplane_idx)
+            self.definepattern(idx, exp[idx], 1, '111', ti[idx], dt[idx], to[idx], merged_idx, bitplane_idx)
 
-
-        # if i<((num-1)//24):
-        #     # j image index (index for iamge sequence)
-        #     # i 24bit RGB image index (index for merged 24bit RGB bitplane image )
-        #     # j-i*24 (bitplane image index in merged 24bit RGB)
-        #     # example)
-        #     # 50 images (j ranged 0-49)
-        #     # 50 images merged into 3 of 24bit RGB image, each 24bit RGB image include 24, 24 and 2 images (i ranged 0-2)
-        #     # j-i*24 means index for each images in 24bit RGB image (j-i*24 ranged 0-23)
-        #     logger.debug(f'case I : i < ((num-1)//24) | {i} < {((num-1)//24)}')
-        #     for j in range(i*24,(i+1)*24):
-        #         self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
-        # else:
-        #     logger.debug(f'case II : i >= ((num-1)//24) | {i} < {((num-1)//24)}')
-        #     for j in range(i*24,num):
-        #         self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
-
-        # self.configurelut(num,rep)
 
         self.configurelut(len(img_index_seq), rep)
         for i in range((num-1)//24+1):
@@ -509,68 +494,6 @@ class DMDhid():
             logger.debug(f'uploading')
             self.bmpload(maserter_encodedimages[(num-1)//24-i],maseter_sizes[(num-1)//24-i], controller='master')
             self.bmpload(slave_encodedimages[(num-1)//24-i],salve_sizes[(num-1)//24-i], controller='slave')
-
-        ########원본, img_index_seq 변수 삭제
-        # for i in range((num-1)//24+1):
-        #     print ('merging...')
-        #     if i<((num-1)//24):
-        #         master_imagedata=master_arr[i*24:(i+1)*24]
-        #         slave_imagedata=slave_arr[i*24:(i+1)*24]
-        #         logger.debug(f'{i} < ((num-1)//24) [{((num-1)//24)}]')
-        #         logger.debug(f'imgdata length | Master [{len(master_imagedata)}] | Slave [{len(slave_imagedata)}]')
-        #     else:
-        #         master_imagedata=master_arr[i*24:]
-        #         slave_imagedata=slave_arr[i*24:]
-        #         logger.debug(f'{i} >= ((num-1)//24) [{((num-1)//24)}]')
-        #         logger.debug(f'imgdata length | Master [{len(master_imagedata)}] | Slave [{len(slave_imagedata)}]')
-
-        #     print ('encoding...')
-        #     master_imagedata = mergeimages(master_imagedata)
-        #     slave_imagedata = mergeimages(slave_imagedata)
-
-        #     master_imagedata, master_size=new_encode(master_imagedata)
-        #     slave_imagedata, slave_size=new_encode(slave_imagedata)
-        #     logger.debug(f'imgdata length | Master [{len(master_imagedata)}] | Slave [{len(slave_imagedata)}]')
-
-        #     maserter_encodedimages.append(master_imagedata)
-        #     slave_encodedimages.append(slave_imagedata)
-
-        #     logger.debug(f'Master encodedimages length : {len(maserter_encodedimages)}')
-        #     logger.debug(f'Slave encodedimages length : {len(slave_encodedimages)}')
-
-        #     maseter_sizes.append(master_size)
-        #     salve_sizes.append(slave_size)
-        #     logger.debug(f'Master sizes length : {len(maseter_sizes)}')
-        #     logger.debug(f'Slave sizes length : {len(salve_sizes)}')
-            
-        #     logger.debug(f'Index : {((num-1)//24)}')
-        #     if i<((num-1)//24):
-        #         # j image index (index for iamge sequence)
-        #         # i 24bit RGB image index (index for merged 24bit RGB bitplane image )
-        #         # j-i*24 (bitplane image index in merged 24bit RGB)
-        #         # example)
-        #         # 50 images (j ranged 0-49)
-        #         # 50 images merged into 3 of 24bit RGB image, each 24bit RGB image include 24, 24 and 2 images (i ranged 0-2)
-        #         # j-i*24 means index for each images in 24bit RGB image (j-i*24 ranged 0-23)
-        #         logger.debug(f'case I : i < ((num-1)//24) | {i} < {((num-1)//24)}')
-        #         for j in range(i*24,(i+1)*24):
-        #             self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
-        #     else:
-        #         logger.debug(f'case II : i >= ((num-1)//24) | {i} < {((num-1)//24)}')
-        #         for j in range(i*24,num):
-        #             self.definepattern(j,exp[j],1,'111',ti[j],dt[j],to[j],i,j-i*24)
-
-        # self.configurelut(num,rep)
-
-        # for i in range((num-1)//24+1):
-        #     logger.debug(f'set bmp idx | (num-1)//24+1 {(num-1)//24+1}, (num-1)//24-i {(num-1)//24-i}')
-        #     self.setbmp((num-1)//24-i, maseter_sizes[(num-1)//24-i], controller='master')
-        #     self.setbmp((num-1)//24-i, salve_sizes[(num-1)//24-i], controller='slave')
-
-        #     print ('uploading...')
-        #     logger.debug(f'uploading')
-        #     self.bmpload(maserter_encodedimages[(num-1)//24-i],maseter_sizes[(num-1)//24-i], controller='master')
-        #     self.bmpload(slave_encodedimages[(num-1)//24-i],salve_sizes[(num-1)//24-i], controller='slave')
 
 
 def mergeimages(images):
@@ -592,14 +515,3 @@ def mergeimages(images):
             
     return mergedimage
 
-
-
-
-'''
-To do list
-
-- encoding algorithm optimize
-- image sequence as input to save memory
-- master, slave command optimize
-- Hadamard matrix generation
-'''
