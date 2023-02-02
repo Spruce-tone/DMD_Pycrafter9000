@@ -38,16 +38,22 @@ Please refer the [example](./hadamard.ipynb)
     + displaying `0-9` in ascending order with `duration 0.3 s`
     + interimage delay `0.3 s`
 
+![Ascending](./movies/ascending_order.gif)
+
 2. Specifying order and duration (The way for saving memory)
     + Stored number `0-13`
     + number sequence `[0, 5, 13, 13, 13, 1, 7, 6]` (only displaying `0, 1, 5, 6, 7, 13` from the stored number `0-13` on the device) 
     + duration order `[0.4, 0.2, 1, 0.6, 0.2, 0.3, 0.3, 0.1]` in `sec`
     + interimage delay `0.4 s`
 
+![Specifying_seq](./movies/specifying_seq.gif)
+
 3. Hadamard pattern
     + 11 images
     + no interimage delay
-    
+
+![Hadamard](./movies/hadamard.gif)
+
 # Reference
 [1] https://github.com/csi-dcsc/Pycrafter6500  
 [2] https://github.com/QI2lab/mcSIM  
