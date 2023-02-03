@@ -1,4 +1,5 @@
 # DMD_Pycrafter9000
+[![DOI](https://zenodo.org/badge/459919255.svg)](https://zenodo.org/badge/latestdoi/459919255)  
 I created a module to control the Lightcrafter9000 EVM (Texas Instruments) because there were only modules available for the Lightcrafter6500.
 So, I integated and modified the previous code and developed several features. The main features are listed below.  
 
